@@ -1,6 +1,6 @@
 {
   "name": "eve-sso-demo",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "node.js demo app for EVE Online single sign on",
   "main": "app.js",
   "dependencies": {

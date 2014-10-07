@@ -1,69 +1,79 @@
-// eve-sso-demo 0.1.0 by plato-cambrian
-
-// https://developers.testeveonline.com/resource/single-sign-on
-// Be sure to configure credentials.js
-
 /*
+ * eve-sso-demo 0.2.0 
+ *   by plato-cambrian
+ *
+ *
+ * Be sure to create credentials.js, and set a user agent in Global Vars
+ * Docs: https://developers.testeveonline.com/resource/single-sign-on
+ *
+ *
  *  SETUP
  */
-
-// Load nodejs libraries:
-var url = require('url');
-var path = require('path');
-
-// these libraries need an `npm install` first:
-var request = require('request');
-var express = require('express');
 
 // Confirm some credentials are available:
 try{
   var credentials = require('./credentials.js');
 } catch(e) {
-  console.log('Failed to find EVE SSO app credentials\n'
-             +'Copy credentials-demo.js to credentials.js and edit.'
-             +'Get credentials at:'
-             +'https://developers.testeveonline.com/resource/single-sign-on'
-             );
+  console.log(
+    'Failed to find EVE SSO app credentials\n'
+   +'Edit credentials-demo.js and save as credentials.js.\n'
+   +'Get credentials at:\n'
+   +'https://developers.testeveonline.com/resource/single-sign-on'
+  );
   throw('No credentials.js')
 }
 
-// Set global vars for clientId and secret from credentials:
+// Global Vars:
 var EVE_SSO_CLIENTID = credentials.client_id;
 var EVE_SSO_SECRET = credentials.client_secret;
-// Set your app's URL where CCP should redirect a user after an auth attempt:
-var EVE_SSO_CALLBACK_URL = credentials.callback_url;
-// (dev note: noscript prevents redirection to localhost URI's)
+var EVE_SSO_CALLBACK_URL = credentials.callback_url; 
+// callback URL must match both CCP website and path in router
+// dev note: noscript prevents redirection to localhost URI's
 
-// Set SSO server:
-//var EVE_SSO_HOST = 'login.eveonline.com';  // disabled as of 2014-10-06
+// Set the authentication server. As of 2014-10-06, only the Singularity test server is available.
+//var EVE_SSO_HOST = 'login.eveonline.com';
 var EVE_SSO_HOST = 'sisilogin.testeveonline.com';
+
+// Set a string that identifies your app as the user agent:
+var MY_USER_AGENT = 'express 4.9.5, eve-sso-demo 0.2.0, EVE client_id ' + EVE_SSO_CLIENTID;
+
+
+// Load nodejs libraries:
+var url = require('url');
+var path = require('path');
+
+// these libraries need an `npm install` first. `npm start` also installs them:
+var request = require('request');
+var express = require('express');
 
 
 /*
  *  EXPRESS WEB SERVER
+ *    http://expressjs.com/
  */
 
 var app = express();
 var router = express.Router();
-// Requests are passed through the chain of app.use request handlers in order,
-// until something throws an error or sends a response.
 
-// Log requests
+// Requests are passed through the chain of app.use() request handlers in order,
+// until something throws an error or sends a response:
+
+// First, log incoming requests:
 app.use(function(req, res, next) {
   console.log('%s %s', req.method, req.url);
   next();  // calling the next argument tells express to hand the request down the chain
 });
 
-// Try to serve requests as static files. 
+// Try to serve requests as static files:
 app.use(express.static(__dirname+'/assets'));
-// Caution, this folder has path `/`, don't put a leading `/assets` in your request path
+// Caution, this folder has path `/`. don't put a leading `/assets` in your request path
 
-// Pass anything that wasn't static to the router:
+// Pass anything that wasn't served as static to the router:
 app.use(router);
 
-// Define an error handler to catch errors:
+// Pass any unrouted requests and exceptions to an error handler:
 app.use(function(err, req, res, next){
-  // four function arguments tells express this is an error handler
+  // a count of four function arguments tells express this is an error handler
   console.error(err);
   console.error(err.stack);
   res.status(500).send('Internal Server Error');
@@ -82,24 +92,32 @@ app.listen(7888, function(err){
  *  ROUTES
  */
 
-// Render SSO button:
+// We have only two SSO-specific routes:
+//   /evesso/begin:    redirect a user to CCP
+//   /evesso/callback: CCP redirects the user here with an code after login
+
+// Respect CCP's api by sending a unique user agent:
+router.all('*', function(req, res, next){
+  res.setHeader('User-Agent', MY_USER_AGENT)
+  next();
+})
+
+// STEP 0. Render a 'Sign on with EVE SSO' button that goes to our own route /evesso/begin
+// You could template the appropriate EVE_SSO_HOST URL into the client html and skip this step,
+// but that means CCP sees a browser user-agent on the initial request, instead of yours
 router.get('/', function(req, res){
   var html = buildHTML(
     '<a href="/evesso/begin">'
    +'<img src="/EVE_SSO_Login_Buttons_Large_Black.png" style="display:block; margin: auto;">'
    +'</a>'
-    );
+  );
   res.status(200).send(html);
 });
 
-// We have only two SSO routes.
-// /evesso/begin:    redirect a user to CCP
-// /evesso/callback: CCP redirects the user here with an code after login
-
-// Step 1. Redirect user to CCP, where they login.
+// STEP 1. Redirect user to CCP, where they login.
 router.get('/evesso/begin', function(req, res){
 
-  // example redirect uri, from CCP docs (linked at top):
+  // example oauth start URI, from CCP docs (linked at top):
   // https://
   //    login.eveonline.com
   //       /oauth/authorize/
@@ -109,14 +127,13 @@ router.get('/evesso/begin', function(req, res){
   //          &scope=
   //          &state=uniquestate123
 
-  // Define CCP's oauth login url:
   var urlObj = {
     protocol: 'https',
     host: EVE_SSO_HOST,
     pathname: '/oauth/authorize',
     query:{
       response_type: 'code',
-      redirect_uri: EVE_SSO_CALLBACK_URL,  // This must exactly match what you gave CCP
+      redirect_uri: EVE_SSO_CALLBACK_URL,  // This must exactly match what you set on CCP's site
       client_id: EVE_SSO_CLIENTID,
       scope: '',
       state: 'my non-unique state',        // use a unique per-request value in CSRF defense, i guess?
@@ -126,12 +143,12 @@ router.get('/evesso/begin', function(req, res){
   // Use node's url library to assemble the URL:
   var ssoBeginURL = url.format(urlObj);
 
-  // Send the user there:
+  // User agent was already set by previous middleware. Redirect user to EVE_SSO_HOST:
   res.redirect(302, ssoBeginURL);
 })
 
 
-// Step 2. CCP redirects the user from their /oauth/authorize to our /evesso/callback with an auth code,
+// STEP 2. CCP redirects the user from their /oauth/authorize to our /evesso/callback with an auth code,
 // We will make two requests to CCP before sending any response to the user's request for /evesso/callback.
 
 router.get('/evesso/callback', function(req, res){
@@ -139,7 +156,7 @@ router.get('/evesso/callback', function(req, res){
 
   var authCode = req.query['code'];
 
-  // Step 3. We have a one-time-use auth code from CCP in the /evesso/callback query string.
+  // STEP 3. We have a one-time-use auth code from CCP in the /evesso/callback query string.
   // We must make a request with our secret and code, to get a token for this user:
   requestToken(authCode, function(err, response3, bodyObj){
     // Now that we're in this callback, requestToken() completed its request/response.
@@ -147,7 +164,7 @@ router.get('/evesso/callback', function(req, res){
     if (!err && response3.statusCode == 200) {
       var token = bodyObj.access_token;
 
-      // Step 4. We have a token from /oauth/token
+      // STEP 4. We have a token from /oauth/token
       // We must make a request with the token to get CharacterID:
       requestCharacterID(token, function(err, response4, bodyObj){
         // Now that we're in this callback, requestCharacterID() completed its request/response.
@@ -174,7 +191,8 @@ router.get('/evesso/callback', function(req, res){
 
 
 /* 
- *  HANDLERS
+ *  HELPER FUNCTIONS
+ *    Placed down here to help keep routes legible
  */
 
 function requestToken(authCode, callback){
@@ -197,6 +215,7 @@ function requestToken(authCode, callback){
     headers:{
       "Authorization": tokenAuthHeaderString,
       //"Host": EVE_SSO_HOST,
+      "User-Agent": MY_USER_AGENT,
     },
     form:{
       grant_type: "authorization_code",
@@ -229,11 +248,12 @@ function requestCharacterID(token, callback){
   // Build the auth header from recently acquired token:
   var verifyAuthHeaderString = "Bearer " + token;
 
-  // Set up options for the post request:
+  // Set up options for the get request:
   var getOptions = {
     url: ssoVerifyUrl,
     headers:{
       "Authorization": verifyAuthHeaderString,
+      "User-Agent": MY_USER_AGENT,
     }
   }
 
