@@ -1,6 +1,7 @@
+// eve-sso-demo 0.1.0 by plato-cambrian
+
 // https://developers.testeveonline.com/resource/single-sign-on
 // Be sure to configure credentials.js
-// eve-sso-demo 0.1.0 by plato-cambrian
 
 /*
  *  SETUP
@@ -43,10 +44,9 @@ var EVE_SSO_HOST = 'sisilogin.testeveonline.com';
  */
 
 var app = express();
-
+var router = express.Router();
 // Requests are passed through the chain of app.use request handlers in order,
 // until something throws an error or sends a response.
-// Requests hit the router at the end of the app.use chain.
 
 // Log requests
 app.use(function(req, res, next) {
@@ -58,10 +58,15 @@ app.use(function(req, res, next) {
 app.use(express.static(__dirname+'/assets'));
 // Caution, this folder has path `/`, don't put a leading `/assets` in your request path
 
-app.use(function(req, res, err, next){
+// Pass anything that wasn't static to the router:
+app.use(router);
+
+// Define an error handler to catch errors:
+app.use(function(err, req, res, next){
   // four function arguments tells express this is an error handler
-  console.log(err);
-  res.status(500).send();
+  console.error(err);
+  console.error(err.stack);
+  res.status(500).send('Internal Server Error');
 })
 
 // Start http server:
@@ -78,7 +83,7 @@ app.listen(7888, function(err){
  */
 
 // Render SSO button:
-app.get('/', function(req, res){
+router.get('/', function(req, res){
   var html = buildHTML(
     '<a href="/evesso/begin">'
    +'<img src="/EVE_SSO_Login_Buttons_Large_Black.png" style="display:block; margin: auto;">'
@@ -87,13 +92,12 @@ app.get('/', function(req, res){
   res.status(200).send(html);
 });
 
-
 // We have only two SSO routes.
 // /evesso/begin:    redirect a user to CCP
 // /evesso/callback: CCP redirects the user here with an code after login
 
 // Step 1. Redirect user to CCP, where they login.
-app.get('/evesso/begin', function(req, res){
+router.get('/evesso/begin', function(req, res){
 
   // example redirect uri, from CCP docs (linked at top):
   // https://
@@ -130,7 +134,7 @@ app.get('/evesso/begin', function(req, res){
 // Step 2. CCP redirects the user from their /oauth/authorize to our /evesso/callback with an auth code,
 // We will make two requests to CCP before sending any response to the user's request for /evesso/callback.
 
-app.get('/evesso/callback', function(req, res){
+router.get('/evesso/callback', function(req, res){
   //console.log('Got redirected to /evesso/callback by CCP')
 
   var authCode = req.query['code'];
